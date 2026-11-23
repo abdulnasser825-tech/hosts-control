@@ -1,0 +1,65 @@
+name: publish-hosts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - hosts.conf
+      - scripts/**
+      - .github/workflows/publish.yml
+  workflow_dispatch:        # زر «Run workflow» لإعادة النشر يدوياً
+  pull_request:
+    paths:
+      - hosts.conf
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosts-publish
+  cancel-in-progress: false  # كل نشر يكتمل بترتيبه كي لا يتراجع ts
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/build_hosts.py --check
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tests
+        run: python3 -m unittest discover -s scripts
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Previous ts (ts must never go backwards)
+        run: |
+          prev=$(curl -fsS --max-time 15 "${{ steps.pages.outputs.base_url }}/hosts.json" \
+            | python3 -c 'import sys,json; print(int(json.load(sys.stdin).get("ts",0)))' 2>/dev/null || echo 0)
+          echo "PREV_TS=${prev:-0}" >> "$GITHUB_ENV"
+
+      - name: Build signed hosts.json
+        env:
+          HOSTS_SECRET: ${{ secrets.HOSTS_SECRET }}
+        run: python3 scripts/build_hosts.py --out site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

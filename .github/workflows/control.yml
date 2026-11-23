@@ -1,0 +1,69 @@
+name: control
+run-name: control — ${{ inputs.action }} ${{ inputs.server }}
+
+# من تطبيق GitHub: Actions ← control ← Run workflow ← اختر الإجراء. لا حاجة لتعديل الملف يدوياً.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: الإجراء
+        type: choice
+        required: true
+        options:
+          - global_off      # إيقاف شامل لكل السيرفرات (القيمة = رسالة اختيارية)
+          - global_on       # إلغاء الإيقاف الشامل
+          - server_off      # إيقاف السيرفر المختار (القيمة = رسالة اختيارية)
+          - server_on       # تشغيل السيرفر المختار
+          - set_host        # تغيير عنوان السيرفر المختار وتشغيله (القيمة = العنوان الجديد)
+          - clear_host      # مسح عنوان السيرفر المختار
+      server:
+        description: رقم السيرفر (للإجراءات الخاصة بسيرفر فقط)
+        type: choice
+        default: "1"
+        options: ["1", "2", "3"]
+      value:
+        description: العنوان الجديد (set_host) أو رسالة الإيقاف (global_off / server_off)؛ الفارغ يُبقي الرسالة الحالية
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write   # لحفظ التعديل في hosts.conf
+  actions: write    # لتشغيل النشر بعد الحفظ
+
+concurrency:
+  group: hosts-control
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply (validated; nothing is written on error)
+        env:
+          ACTION: ${{ inputs.action }}
+          SERVER: ${{ inputs.server }}
+          VALUE: ${{ inputs.value }}
+        run: python3 scripts/edit_conf.py --action "$ACTION" --server "$SERVER" --value "$VALUE"
+
+      - name: Commit and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          ACTION: ${{ inputs.action }}
+          SERVER: ${{ inputs.server }}
+          REF: ${{ github.ref_name }}
+        run: |
+          if git diff --quiet -- hosts.conf; then
+            echo "::notice::لا تغيير: الإعداد مطابق لما طلبت"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hosts.conf
+          git commit -m "control: $ACTION $SERVER (by $ACTOR)"
+          git push
+          # الدفع بـ GITHUB_TOKEN لا يشغّل push تلقائياً، لذا نطلب النشر صراحة
+          gh workflow run publish.yml --ref "$REF"
