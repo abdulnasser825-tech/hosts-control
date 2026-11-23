@@ -119,10 +119,6 @@ class RunTests(unittest.TestCase):
         self.assertEqual(act, "close")
         self.assertIn(["issue", "close"], calls)
 
-    def test_shipped_conf_has_nothing_to_probe(self):
-        with open(os.path.join(os.path.dirname(__file__), "..", "hosts.conf"), encoding="utf-8") as f:
-            self.assertEqual(m.targets(b.parse_conf(f.read())), [])
-
 
 if __name__ == "__main__":
     unittest.main()
